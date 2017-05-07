@@ -90,8 +90,8 @@ func (t *User) TableName() string {
 最后展示一下比较全的用法:
 
 ```bash
-> $ table2struct -db_host 127.0.0.1 -db_name mydatabase -db_port 3306 -db_user root -db_pwd root -int64=true\
--output /tmp -package_name foo -tag_gorm=true -tag_xorm=true -tag_json=true -tag_sqlx=true user
+> $ table2struct -db_host 127.0.0.1 -db_name mydatabase -db_port 3306 -db_user root -db_pwd root\
+ -int64=true -output /tmp -package_name foo -tag_gorm=true -tag_xorm=true -tag_json=true -tag_sqlx=true user
 
 > $ cat /tmp/user.go                                                        
 package foo
