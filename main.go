@@ -260,10 +260,10 @@ func toStruct(table Table) string {
 			tags = append(tags, `db:"`+field.Name+`"`)
 		}
 		if tagGORM {
-			tags = append(tags, `gorm:"`+field.Name+`"`)
+			tags = append(tags, `gorm:"column:`+field.Name+`"`)
 		}
 		if tagXORM {
-			tags = append(tags, `xorm:"`+field.Name+`"`)
+			tags = append(tags, `xorm:"'`+field.Name+`'"`)
 		}
 		if len(tags) > 0 {
 			tag := strings.Join(tags, " ")
