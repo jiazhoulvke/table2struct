@@ -310,7 +310,7 @@ func ParseField(tField TableField) Field {
 	field.Name = tField.Field
 	field.Type = goType(t)
 	field.Default = tField.Default
-	if field.IsUnsigned {
+	if field.IsUnsigned && !useInt64 {
 		field.Type = "u" + field.Type
 	}
 	return field

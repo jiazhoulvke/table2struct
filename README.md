@@ -98,13 +98,13 @@ package foo
 
 //User user
 type User struct {
-	ID       int    `json:"id" db:"id" gorm:"column:id" xorm:"'id'"`
+	ID       int64  `json:"id" db:"id" gorm:"column:id" xorm:"'id'"`
 	Username string `json:"username" db:"username" gorm:"column:username" xorm:"'username'"`
 	Password string `json:"password" db:"password" gorm:"column:password" xorm:"'password'"`
 	Email    string `json:"email" db:"email" gorm:"column:email" xorm:"'email'"`
-	Age      uint   `json:"age" db:"age" gorm:"column:age" xorm:"'age'"`
+	Age      uint64 `json:"age" db:"age" gorm:"column:age" xorm:"'age'"`
 	Address  string `json:"address" db:"address" gorm:"column:address" xorm:"'address'"`
-	Status   int8   `json:"status" db:"status" gorm:"column:status" xorm:"'status'"`
+	Status   int64  `json:"status" db:"status" gorm:"column:status" xorm:"'status'"`
 }
 
 //TableName user
