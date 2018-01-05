@@ -27,10 +27,14 @@ Usage of table2struct:
       --output string         输出路径,默认为当前目录
       --package_name string   包名 (default "models")
       --query string          查询数据库字段名转换后的golang字段名并立即退出
+      --skip_if_no_prefix     当表名不包含指定前缀时跳过不处理
+      --table_prefix string   表名前缀
       --tag_gorm              是否生成gorm的tag
+      --tag_gorm_type         是否将type包含进gorm的tag (default true)
       --tag_json              是否生成json的tag (default true)
       --tag_sqlx              是否生成sqlx的tag
       --tag_xorm              是否生成xorm的tag
+      --tag_xorm_type         是否将type包含进xorm的tag (default true)
 ```
 
 比如你有一个名叫mydatabase的数据库，里面有一个user表：
@@ -72,14 +76,14 @@ func (t *User) TableName() string {
 
 介绍几个需要注意的参数：
 
-- -int64 
- 强制把所有整型字段全部声明为int64,比如上面示例中的Status为`Status int8`,加入参数-int64=true后，生成的字段就会是`Status int64`
-- -tag\_json 
+- `--int64` 
+ 强制把所有整型字段全部声明为int64,比如上面示例中的Status为`Status int8`,加入参数--int64=true后，生成的字段就会是`Status int64`
+- `--tag_json` 
  默认启用，会在struct的tag里增加`json:"字段名"`
-- 同理，-tag\_sqlx、-tag\_xorm、-tag\_gorm可以分别生成对应框架需要的tag
+- 同理，`--tag_sqlx`、`--tag_xorm`、`--tag_gorm`可以分别生成对应框架需要的tag
 
 
-### 转换结果查询 ###
+### 转换结果查询 ###
 
 假如你还不想真正生成字段，只是想预览一下数据库里的字段会变成什么名字，就可以用`table2struct --query [表名.]字段名` 进行查询，比如：
 
@@ -92,7 +96,7 @@ table1.foo => table1.Foo
 
 ### 字段映射 ###
 
-有时对于一些自动转换的字段名不满意，比如user表中有一个username字段，自动转换出来的将会是Username,但我想要它转成UserName，那该怎么办呢？这时就可以通过mapping参数来强制将username转换成UserName。
+有时对于一些自动转换的字段名不满意，比如user表中有一个username字段，自动转换出来的将会是Username,但我想要它转成UserName，那该怎么办呢？这时就可以通过`--mapping`参数来强制将username转换成UserName。
 
 ```bash
 $ table2struct --mapping username:UserName --query username
@@ -118,7 +122,7 @@ $ table2struct --mapping table1.foo1:foo2 --query table1.foo1
 table1.foo1 => table1.foo2
 ```
 
-假如需要映射的字段名很多的话，放在一个文件里显然更合适一点，这时就可以用--mapping_file这个参数了:
+假如需要映射的字段名很多的话，放在一个文件里显然更合适一点，这时就可以用`--mapping_file`这个参数了:
 
 ```bash
 $ cat mapping.txt
@@ -129,3 +133,18 @@ $ table2struct --mapping_file mapping.txt --query foo
 
 foo => bar
 ```
+
+### 处理前缀 ###
+
+有时我们的表名都带有统一的前缀，比如:
+
+> google_table1  
+> google_table2  
+> google_table3  
+
+这时生成的文件名是google_table1.go，结构名是GoogleTable1。然而我们需要它生成的文件名是google1.go，结构名是Table1，这时就可以用到`--table_prefix`这个参数了
+
+```bash
+$ table2struct --table_prefix google_
+```
+
