@@ -40,8 +40,10 @@ var (
 	mapping     []string
 	mappingFile string
 	//dbMapping 映射关系
-	dbMapping map[string]map[string]string
-	query     string
+	dbMapping      map[string]map[string]string
+	query          string
+	tablePrefix    string
+	skipIfNoPrefix bool
 )
 
 func init() {
@@ -71,6 +73,8 @@ func init() {
 	flag.StringSliceVar(&mapping, "mapping", []string{}, "强制将字段名转换成指定的名称。如--mapping foo:Bar,则表中叫foo的字段在golang中会强制命名为Bar")
 	flag.StringVar(&mappingFile, "mapping_file", "", "字段名映射文件")
 	flag.StringVar(&query, "query", "", "查询数据库字段名转换后的golang字段名并立即退出")
+	flag.StringVar(&tablePrefix, "table_prefix", "", "表名前缀")
+	flag.BoolVar(&skipIfNoPrefix, "skip_if_no_prefix", false, "当表名不包含指定前缀时跳过不处理")
 }
 
 func main() {
@@ -154,6 +158,10 @@ func main() {
 		}
 	}
 	for _, tableName := range tableNames {
+		//当表名不包含指定前缀时跳过
+		if tablePrefix != "" && skipIfNoPrefix && !strings.Contains(tableName, tablePrefix) {
+			continue
+		}
 		table, err := GetTable(tableName)
 		if err != nil {
 			fmt.Printf("读取表%v失败:%v\n", tableName, err)
@@ -178,7 +186,7 @@ func main() {
 			fmt.Printf("格式化%s的代码失败:%v\n", tableName, err)
 			os.Exit(1)
 		}
-		if err = ioutil.WriteFile(filepath.Join(output, tableName+".go"), buf.Bytes(), 0666); err != nil {
+		if err = ioutil.WriteFile(filepath.Join(output, table.Name+".go"), buf.Bytes(), 0666); err != nil {
 			fmt.Printf("保存文件失败:%v\n", err)
 			os.Exit(1)
 		}
@@ -201,9 +209,11 @@ type Field struct {
 
 //Table 表
 type Table struct {
-	Name    string
-	Fields  []Field
-	HasTime bool
+	Name       string
+	OriginName string
+	Fields     []Field
+	HasTime    bool
+	HasPrefix  bool
 }
 
 //TableField 表字段属性
@@ -283,7 +293,13 @@ func GetTable(tableName string) (Table, error) {
 	table := Table{
 		Fields: make([]Field, 0, 16),
 	}
+	table.OriginName = tableName
 	table.Name = tableName
+	if tablePrefix != "" {
+		if strings.HasPrefix(tableName, tablePrefix) {
+			table.Name = tableName[len(tablePrefix):]
+		}
+	}
 	rows, err := db.Queryx("DESC `" + tableName + "`")
 	if err != nil {
 		return table, err
@@ -367,7 +383,7 @@ import (
 	"time"
 )`
 	}
-	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, table.Name, tableGoName, buf.String(), table.Name, tableGoName, table.Name)
+	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, table.Name, tableGoName, buf.String(), table.Name, tableGoName, table.OriginName)
 }
 
 //ParseField 解析字段
