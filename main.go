@@ -231,6 +231,9 @@ func toGoName(dbName string, tableName string) string {
 			return goName
 		}
 	}
+	if len(dbName) == 1 {
+		return strings.ToUpper(dbName)
+	}
 	var value string
 	for i, v := range dbName {
 		if (v >= 'A' && v <= 'Z') || (v >= 'a' && v <= 'z') {
