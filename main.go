@@ -3,17 +3,19 @@ package main
 import (
 	"bytes"
 	"database/sql"
-	"flag"
 	"fmt"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	flag "github.com/spf13/pflag"
 )
 
 var (
@@ -32,10 +34,20 @@ var (
 	tagGORM     bool
 	tagXORM     bool
 	tagSQLX     bool
+	tagGORMType bool
+	tagXORMType bool
 	tagJSON     bool
+	mapping     []string
+	mappingFile string
+	//dbMapping 映射关系
+	dbMapping map[string]map[string]string
+	query     string
 )
 
 func init() {
+	dbMapping = map[string]map[string]string{
+		"global": make(map[string]string),
+	}
 	var commonInitialismsForReplacer []string
 	for _, initialism := range commonInitialisms {
 		commonInitialismsForReplacer = append(commonInitialismsForReplacer, strings.ToLower(initialism), initialism)
@@ -51,43 +63,84 @@ func init() {
 	flag.StringVar(&packageName, "package_name", "models", "包名")
 	flag.StringVar(&output, "output", "", "输出路径,默认为当前目录")
 	flag.BoolVar(&tagGORM, "tag_gorm", false, "是否生成gorm的tag")
+	flag.BoolVar(&tagGORMType, "tag_gorm_type", true, "是否将type包含进gorm的tag")
 	flag.BoolVar(&tagXORM, "tag_xorm", false, "是否生成xorm的tag")
+	flag.BoolVar(&tagXORMType, "tag_xorm_type", true, "是否将type包含进xorm的tag")
 	flag.BoolVar(&tagSQLX, "tag_sqlx", false, "是否生成sqlx的tag")
 	flag.BoolVar(&tagJSON, "tag_json", true, "是否生成json的tag")
+	flag.StringSliceVar(&mapping, "mapping", []string{}, "强制将字段名转换成指定的名称。如--mapping foo:Bar,则表中叫foo的字段在golang中会强制命名为Bar")
+	flag.StringVar(&mappingFile, "mapping_file", "", "字段名映射文件")
+	flag.StringVar(&query, "query", "", "查询数据库字段名转换后的golang字段名并立即退出")
 }
 
 func main() {
-	var err error
 	flag.Parse()
+	var err error
+
+	//从文件中解析映射规则
+	if mappingFile != "" {
+		mappingFileContent, err := ioutil.ReadFile(mappingFile)
+		if err != nil {
+			fmt.Printf("读取映射文件失败:%v\n", err)
+			os.Exit(1)
+		}
+		for _, mappingStr := range strings.Split(string(mappingFileContent), "\n") {
+			mappingStr = strings.TrimSpace(mappingStr)
+			if mappingStr == "" {
+				continue
+			}
+			if err := addMapping(mappingStr); err != nil {
+				fmt.Printf("映射文件格式错误: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+	//从参数中解析映射规则
+	if len(mapping) > 0 {
+		for _, mappingStr := range mapping {
+			if err := addMapping(mappingStr); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	if query != "" {
+		tableName, originName, err := parseQuery(query)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		displayTable := ""
+		if tableName != "" {
+			displayTable = tableName + "."
+		}
+		fmt.Println(query, "=>", displayTable+toGoName(originName, tableName))
+		return
+	}
 
 	if output == "" {
 		output, err = filepath.Abs(filepath.Dir(os.Args[0]))
 		if err != nil {
 			fmt.Printf("获取当前路径失败")
-			return
+			os.Exit(1)
 		}
-	}
-
-	gofmtCmd, err := exec.LookPath("gofmt")
-	if err != nil {
-		fmt.Printf("获取gofmt可执行文件的路径失败:%v\n", err)
-		return
 	}
 
 	if _, statErr := os.Stat(output); statErr != nil {
 		if os.IsNotExist(statErr) {
 			fmt.Printf("错误的输入路径:%v", output)
-			return
+			os.Exit(1)
 		}
 	}
 	if dbName == "" {
 		fmt.Printf("请输入数据库名称")
-		return
+		os.Exit(1)
 	}
 	db, err = sqlx.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true", dbUser, dbPwd, dbHost, dbPort, dbName))
 	if err != nil {
 		fmt.Printf("连接数据库失败:%v", err)
-		return
+		os.Exit(1)
 	}
 	defer db.Close()
 
@@ -97,32 +150,37 @@ func main() {
 	} else {
 		if tableNames, err = GetTableNames(); err != nil {
 			fmt.Printf("读取表名失败:%v", err)
-			return
+			os.Exit(1)
 		}
 	}
 	for _, tableName := range tableNames {
 		table, err := GetTable(tableName)
 		if err != nil {
 			fmt.Printf("读取表%v失败:%v\n", tableName, err)
-			return
+			os.Exit(1)
 		}
-		tempFile, err := ioutil.TempFile("", "table2struct_")
+		tmpFile, err := ioutil.TempFile(os.TempDir(), "table2struct_")
 		if err != nil {
-			fmt.Printf("创建文件失败:%v\n", err)
-			return
+			fmt.Println("创建临时文件失败:", err)
+			os.Exit(1)
 		}
-		tempFile.WriteString(toStruct(table))
-		cmd := exec.Command(gofmtCmd, tempFile.Name())
-		out, err := cmd.Output()
-		cmd.Stderr = os.Stderr
+		tmpFile.WriteString(toStruct(table))
+		tmpFile.Close()
+		defer os.Remove(tmpFile.Name())
+		fset := token.NewFileSet()
+		node, err := parser.ParseFile(fset, tmpFile.Name(), nil, parser.ParseComments)
 		if err != nil {
-			fmt.Printf("执行格式化命令[%s %s]失败:%v\n", gofmtCmd, tempFile.Name(), err)
-			return
+			fmt.Println("解析struct失败:", err)
+			os.Exit(1)
 		}
-		tempFile.Close()
-		os.Remove(tempFile.Name())
-		if err = ioutil.WriteFile(filepath.Join(output, tableName+".go"), out, 0666); err != nil {
+		var buf bytes.Buffer
+		if err := format.Node(&buf, fset, node); err != nil {
+			fmt.Printf("格式化%s的代码失败:%v\n", tableName, err)
+			os.Exit(1)
+		}
+		if err = ioutil.WriteFile(filepath.Join(output, tableName+".go"), buf.Bytes(), 0666); err != nil {
 			fmt.Printf("保存文件失败:%v\n", err)
+			os.Exit(1)
 		}
 	}
 
@@ -132,6 +190,7 @@ func main() {
 type Field struct {
 	Name          string
 	Type          string
+	OriginType    string
 	Length        int
 	DecimalDigits int
 	IsUnsigned    bool
@@ -161,7 +220,17 @@ type TableField struct {
 }
 
 //toGoName 参考 github.com/jinzhu/gorm 的 ToDBName
-func toGoName(dbName string) string {
+func toGoName(dbName string, tableName string) string {
+	if m, ok := dbMapping[tableName]; ok {
+		if goName, goNameOK := m[dbName]; goNameOK {
+			return goName
+		}
+	}
+	if m, ok := dbMapping["global"]; ok {
+		if goName, goNameOK := m[dbName]; goNameOK {
+			return goName
+		}
+	}
 	var value string
 	for i, v := range dbName {
 		if (v >= 'A' && v <= 'Z') || (v >= 'a' && v <= 'z') {
@@ -251,7 +320,7 @@ func (t *%s) TableName() string {
 func toStruct(table Table) string {
 	buf := bytes.NewBufferString("")
 	for _, field := range table.Fields {
-		buf.WriteString("\t" + toGoName(field.Name) + "\t" + field.Type)
+		buf.WriteString("\t" + toGoName(field.Name, table.Name) + "\t" + field.Type)
 		tags := make([]string, 0)
 		if tagJSON {
 			tags = append(tags, `json:"`+field.Name+`"`)
@@ -260,10 +329,26 @@ func toStruct(table Table) string {
 			tags = append(tags, `db:"`+field.Name+`"`)
 		}
 		if tagGORM {
-			tags = append(tags, `gorm:"column:`+field.Name+`"`)
+			gormTags := []string{"column:" + field.Name}
+			if tagGORMType {
+				if strings.Contains(field.OriginType, ")") {
+					gormTags = append(gormTags, "type:"+field.OriginType[:strings.Index(field.OriginType, ")")+1])
+				} else {
+					gormTags = append(gormTags, "type:"+field.OriginType)
+				}
+			}
+			tags = append(tags, fmt.Sprintf(`gorm:"%s"`, strings.Join(gormTags, ";")))
 		}
 		if tagXORM {
-			tags = append(tags, `xorm:"'`+field.Name+`'"`)
+			xormTags := []string{"'" + field.Name + "'"}
+			if tagXORMType {
+				if strings.Contains(field.OriginType, ")") {
+					xormTags = append(xormTags, field.OriginType[:strings.Index(field.OriginType, ")")+1])
+				} else {
+					xormTags = append(xormTags, field.OriginType)
+				}
+			}
+			tags = append(tags, fmt.Sprintf(`xorm:"%s"`, strings.Join(xormTags, " ")))
 		}
 		if len(tags) > 0 {
 			tag := strings.Join(tags, " ")
@@ -271,7 +356,7 @@ func toStruct(table Table) string {
 		}
 		buf.WriteRune('\n')
 	}
-	tableGoName := toGoName(table.Name)
+	tableGoName := toGoName(table.Name, table.Name)
 	importString := "\n"
 	if table.HasTime {
 		importString = `
@@ -295,7 +380,6 @@ func ParseField(tField TableField) Field {
 			l := strings.Index(attr, "(")
 			if l > 0 {
 				t = attr[0:l]
-				//fmt.Println(attr[l+1 : len(attr)-1])
 			}
 		} else {
 			t = attr
@@ -313,6 +397,7 @@ func ParseField(tField TableField) Field {
 	if field.IsUnsigned && !useInt64 {
 		field.Type = "u" + field.Type
 	}
+	field.OriginType = tField.Type
 	return field
 }
 
@@ -367,11 +452,49 @@ func goType(dbType string) string {
 	case "timestamp":
 		return "time.Time"
 	default:
-		return ""
+		panic("未知类型:" + dbType)
+		//return ""
 	}
 }
 
-//ParseAttribute 解析属性
-func ParseAttribute(attr string) {
-	fmt.Println(attr)
+//addMapping 增加映射
+func addMapping(m string) error {
+	if strings.Count(m, ":") != 1 {
+		return fmt.Errorf("映射格式错误: [%s]", m)
+	}
+	m1 := strings.Split(m, ":")
+	if len(m1) != 2 {
+		return fmt.Errorf("映射格式错误: [%s]", m)
+	}
+	destName := m1[1]
+	var originName string
+	tableName := "global"
+	if strings.Contains(m1[0], ".") {
+		m2 := strings.Split(m1[0], ".")
+		if len(m2) != 2 {
+			return fmt.Errorf("映射格式错误: [%s]", m)
+		}
+		tableName, originName = m2[0], m2[1]
+	} else {
+		originName = m1[0]
+	}
+	if _, ok := dbMapping[tableName]; !ok {
+		dbMapping[tableName] = make(map[string]string)
+	}
+	dbMapping[tableName][originName] = destName
+	return nil
+}
+
+func parseQuery(query string) (tableName, fieldName string, err error) {
+	if strings.Contains(query, ".") {
+		q := strings.Split(query, ".")
+		if len(q) != 2 {
+			err = fmt.Errorf("格式错误")
+		}
+		tableName = q[0]
+		fieldName = q[1]
+	} else {
+		fieldName = query
+	}
+	return
 }

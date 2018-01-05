@@ -2,44 +2,35 @@
 
 我写golang代码时最烦的就是为MySQL数据库定义相应的struct，这种机械化的任务当然是要交给机器来完成啦。table2struct可以一次性生成整个数据库里所有表的struct，也可以选择性的生成某几个表的struct，然后根据你的需求稍加修改就能用了。
 
-## 安装
+## 安装 ##
 
 ```bash
 go get github.com/jiazhoulvke/table2struct
 ```
 
-table2struct会调用gofmt来格式化代码，请确保gofmt可正常执行。
+## 使用说明 ##
 
-## 使用说明
+### 基本应用 ###
 
 先来看看table2struct支持的参数:
 
 ```
 Usage of table2struct:
-  -db_host string
-    	数据库ip地址 (default "127.0.0.1")
-  -db_name string
-    	数据库名
-  -db_port int
-    	数据库端口 (default 3306)
-  -db_pwd string
-    	数据库密码 (default "root")
-  -db_user string
-    	数据库用户名 (default "root")
-  -int64
-    	是否将tinyint、smallint等类型也转换int64
-  -output string
-    	输出路径,默认为当前目录
-  -package_name string
-    	包名 (default "models")
-  -tag_gorm
-    	是否生成gorm的tag
-  -tag_json
-    	是否生成json的tag (default true)
-  -tag_sqlx
-    	是否生成sqlx的tag
-  -tag_xorm
-    	是否生成xorm的tag
+      --db_host string        数据库ip地址 (default "127.0.0.1")
+      --db_name string        数据库名
+      --db_port int           数据库端口 (default 3306)
+      --db_pwd string         数据库密码 (default "root")
+      --db_user string        数据库用户名 (default "root")
+      --int64                 是否将tinyint、smallint等类型也转换int64
+      --mapping strings       强制将字段名转换成指定的名称。如--mapping foo:Bar,则表中叫foo的字段在golang中会强制命名为Bar
+      --mapping_file string   字段名映射文件
+      --output string         输出路径,默认为当前目录
+      --package_name string   包名 (default "models")
+      --query string          查询数据库字段名转换后的golang字段名并立即退出
+      --tag_gorm              是否生成gorm的tag
+      --tag_json              是否生成json的tag (default true)
+      --tag_sqlx              是否生成sqlx的tag
+      --tag_xorm              是否生成xorm的tag
 ```
 
 比如你有一个名叫mydatabase的数据库，里面有一个user表：
@@ -57,7 +48,7 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB;
 ```
 
-通过运行`table2struct -db_name mydatabase`就可以生成一个user.go文件:
+通过运行`table2struct --db_name mydatabase`就可以生成一个user.go文件:
 
 ```go
 package models
@@ -87,28 +78,54 @@ func (t *User) TableName() string {
  默认启用，会在struct的tag里增加`json:"字段名"`
 - 同理，-tag\_sqlx、-tag\_xorm、-tag\_gorm可以分别生成对应框架需要的tag
 
-最后展示一下比较全的用法:
+
+### 转换结果查询 ###
+
+假如你还不想真正生成字段，只是想预览一下数据库里的字段会变成什么名字，就可以用`table2struct --query [表名.]字段名` 进行查询，比如：
 
 ```bash
-> $ table2struct -db_host 127.0.0.1 -db_name mydatabase -db_port 3306 -db_user root -db_pwd root\
- -int64=true -output /tmp -package_name foo -tag_gorm=true -tag_xorm=true -tag_json=true -tag_sqlx=true user
+$ table2struct --query table1.foo
 
-> $ cat /tmp/user.go                                                        
-package foo
+table1.foo => table1.Foo
+```
 
-//User user
-type User struct {
-	ID       int64  `json:"id" db:"id" gorm:"column:id" xorm:"'id'"`
-	Username string `json:"username" db:"username" gorm:"column:username" xorm:"'username'"`
-	Password string `json:"password" db:"password" gorm:"column:password" xorm:"'password'"`
-	Email    string `json:"email" db:"email" gorm:"column:email" xorm:"'email'"`
-	Age      uint64 `json:"age" db:"age" gorm:"column:age" xorm:"'age'"`
-	Address  string `json:"address" db:"address" gorm:"column:address" xorm:"'address'"`
-	Status   int64  `json:"status" db:"status" gorm:"column:status" xorm:"'status'"`
-}
 
-//TableName user
-func (t *User) TableName() string {
-	return "user"
-}
+### 字段映射 ###
+
+有时对于一些自动转换的字段名不满意，比如user表中有一个username字段，自动转换出来的将会是Username,但我想要它转成UserName，那该怎么办呢？这时就可以通过mapping参数来强制将username转换成UserName。
+
+```bash
+$ table2struct --mapping username:UserName --query username
+
+username => UserName
+```
+
+--mapping 这个参数是可以无限制的增加的，也就是说你可以这样:
+
+```bash
+table2struct --mapping foo1:foo2 --mapping bar1:bar2 --mapping baz1:baz2
+```
+
+左边的字段是可以带上表名的，比如这样:
+
+```bash
+$ table2struct --mapping table1.foo1:foo2 --query foo1
+
+table1.foo1 = table1.Foo1 
+
+$ table2struct --mapping table1.foo1:foo2 --query table1.foo1
+
+table1.foo1 => table1.foo2
+```
+
+假如需要映射的字段名很多的话，放在一个文件里显然更合适一点，这时就可以用--mapping_file这个参数了:
+
+```bash
+$ cat mapping.txt
+
+foo:bar
+
+$ table2struct --mapping_file mapping.txt --query foo
+
+foo => bar
 ```
