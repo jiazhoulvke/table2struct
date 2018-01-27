@@ -46,6 +46,99 @@ var (
 	skipIfNoPrefix bool
 )
 
+//Mapping 映射
+type Mapping struct {
+	FieldName string
+	FieldType string
+}
+
+//Field 字段
+type Field struct {
+	Name          string
+	Type          string
+	OriginType    string
+	Length        int
+	DecimalDigits int
+	IsUnsigned    bool
+	EnableNull    bool
+	IsPrimaryKey  bool
+	Default       string
+	Comment       string
+}
+
+//Table 表
+type Table struct {
+	Name       string
+	OriginName string
+	Fields     []Field
+	HasTime    bool
+	HasPrefix  bool
+	Comment    string
+}
+
+//TableField 表字段属性
+type TableField struct {
+	Field      string         `db:"Field"`
+	Type       string         `db:"Type"`
+	Collation  sql.NullString `db:"Collation"`
+	Null       sql.NullString `db:"Null"`
+	Key        sql.NullString `db:"Key"`
+	Default    sql.NullString `db:"Default"`
+	Extra      sql.NullString `db:"Extra"`
+	Privileges sql.NullString `db:"Privileges"`
+	Comment    sql.NullString `db:"Comment"`
+}
+
+//TableSchema table
+type TableSchema struct {
+	TableCatalog   string         `db:"TABLE_CATALOG"`
+	TableSchema    string         `db:"TABLE_SCHEMA"`
+	TableName      string         `db:"TABLE_NAME"`
+	TableType      string         `db:"TABLE_TYPE"`
+	Engine         string         `db:"ENGINE"`
+	Version        sql.NullInt64  `db:"VERSION"`
+	RowFormat      sql.NullString `db:"ROW_FORMAT"`
+	TableRows      sql.NullInt64  `db:"TABLE_ROWS"`
+	AvgRowLength   sql.NullInt64  `db:"AVG_ROW_LENGTH"`
+	DataLength     sql.NullInt64  `db:"DATA_LENGTH"`
+	MaxDataLength  sql.NullInt64  `db:"MAX_DATA_LENGTH"`
+	IndexLength    sql.NullInt64  `db:"INDEX_LENGTH"`
+	DataFree       sql.NullInt64  `db:"DATA_FREE"`
+	AutoIncrement  sql.NullInt64  `db:"AUTO_INCREMENT"`
+	CreateTime     sql.NullString `db:"CREATE_TIME"`
+	UpdateTime     sql.NullString `db:"UPDATE_TIME"`
+	CheckTime      sql.NullString `db:"CHECK_TIME"`
+	TableCollation sql.NullString `db:"TABLE_COLLATION"`
+	Checksum       sql.NullInt64  `db:"CHECKSUM"`
+	CreateOptions  sql.NullString `db:"CREATE_OPTIONS"`
+	TableComment   sql.NullString `db:"TABLE_COMMENT"`
+}
+
+//ColumnSchema column
+type ColumnSchema struct {
+	TableCatalog           sql.NullString `db:"TABLE_CATALOG"`
+	TableSchema            string         `db:"TABLE_SCHEMA"`
+	TableName              string         `db:"TABLE_NAME"`
+	ColumnName             string         `db:"COLUMN_NAME"`
+	OrdinalPosition        sql.NullInt64  `db:"ORDINAL_POSITION"`
+	ColumnDefault          sql.NullString `db:"COLUMN_DEFAULT"`
+	IsNullAble             string         `db:"IS_NULLABLE"`
+	DataType               string         `db:"DATA_TYPE"`
+	CharacterMaximumLength sql.NullInt64  `db:"CHARACTER_MAXIMUM_LENGTH"`
+	CharacterOctetLength   sql.NullInt64  `db:"CHARACTER_OCTET_LENGTH"`
+	NumericPrecision       sql.NullInt64  `db:"NUMERIC_PRECISION"`
+	NumericScale           sql.NullInt64  `db:"NUMERIC_SCALE"`
+	DatetimePrecision      sql.NullInt64  `db:"DATETIME_PRECISION"`
+	CharacterSetName       sql.NullString `db:"CHARACTER_SET_NAME"`
+	CollationName          sql.NullString `db:"COLLATION_NAME"`
+	ColumnType             string         `db:"COLUMN_TYPE"`
+	ColumnKey              sql.NullString `db:"COLUMN_KEY"`
+	Extra                  sql.NullString `db:"EXTRA"`
+	Privileges             sql.NullString `db:"PRIVILEGES"`
+	ColumnComment          sql.NullString `db:"COLUMN_COMMENT"`
+	GenerationExpression   string         `db:"GENERATION_EXPRESSION"`
+}
+
 func init() {
 	dbMapping = map[string]map[string]string{
 		"global": make(map[string]string),
@@ -141,30 +234,26 @@ func main() {
 		fmt.Printf("请输入数据库名称")
 		os.Exit(1)
 	}
-	db, err = sqlx.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true", dbUser, dbPwd, dbHost, dbPort, dbName))
+	db, err = sqlx.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/information_schema?parseTime=true", dbUser, dbPwd, dbHost, dbPort))
 	if err != nil {
 		fmt.Printf("连接数据库失败:%v", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
-	var tableNames []string
-	if flag.NArg() > 0 {
-		tableNames = flag.Args()
-	} else {
-		if tableNames, err = GetTableNames(); err != nil {
-			fmt.Printf("读取表名失败:%v", err)
-			os.Exit(1)
-		}
+	tableSchemas, err := GetTables(flag.Args())
+	if err != nil {
+		fmt.Printf("读取数据库表失败:%v", err)
+		os.Exit(1)
 	}
-	for _, tableName := range tableNames {
+	for _, tableSchema := range tableSchemas {
 		//当表名不包含指定前缀时跳过
-		if tablePrefix != "" && skipIfNoPrefix && !strings.Contains(tableName, tablePrefix) {
+		if tablePrefix != "" && skipIfNoPrefix && !strings.Contains(tableSchema.TableName, tablePrefix) {
 			continue
 		}
-		table, err := GetTable(tableName)
+		table, err := GetTable(tableSchema)
 		if err != nil {
-			fmt.Printf("读取表%v失败:%v\n", tableName, err)
+			fmt.Printf("读取表%v失败:%v\n", tableSchema.TableName, err)
 			os.Exit(1)
 		}
 		tmpFile, err := ioutil.TempFile(os.TempDir(), "table2struct_")
@@ -183,7 +272,7 @@ func main() {
 		}
 		var buf bytes.Buffer
 		if err := format.Node(&buf, fset, node); err != nil {
-			fmt.Printf("格式化%s的代码失败:%v\n", tableName, err)
+			fmt.Printf("格式化%s的代码失败:%v\n", tableSchema.TableName, err)
 			os.Exit(1)
 		}
 		if err = ioutil.WriteFile(filepath.Join(output, table.Name+".go"), buf.Bytes(), 0666); err != nil {
@@ -192,41 +281,6 @@ func main() {
 		}
 	}
 
-}
-
-//Field 字段
-type Field struct {
-	Name          string
-	Type          string
-	OriginType    string
-	Length        int
-	DecimalDigits int
-	IsUnsigned    bool
-	EnableNull    bool
-	IsPrimaryKey  bool
-	Default       sql.NullString
-}
-
-//Table 表
-type Table struct {
-	Name       string
-	OriginName string
-	Fields     []Field
-	HasTime    bool
-	HasPrefix  bool
-}
-
-//TableField 表字段属性
-type TableField struct {
-	Field      string         `db:"Field"`
-	Type       string         `db:"Type"`
-	Collation  sql.NullString `db:"Collation"`
-	Null       sql.NullString `db:"Null"`
-	Key        sql.NullString `db:"Key"`
-	Default    sql.NullString `db:"Default"`
-	Extra      sql.NullString `db:"Extra"`
-	Privileges sql.NullString `db:"Privileges"`
-	Comment    sql.NullString `db:"Comment"`
 }
 
 //toGoName 参考 github.com/jinzhu/gorm 的 ToDBName
@@ -271,40 +325,53 @@ func toGoName(dbName string, tableName string) string {
 	return buf.String()
 }
 
-//GetTableNames 获取所有表名
-func GetTableNames() ([]string, error) {
-	tables := make([]string, 0, 32)
-	rows, err := db.Query("SHOW TABLES")
+//GetTables 获取所有表
+func GetTables(args []string) ([]TableSchema, error) {
+	tables := make([]TableSchema, 0, 32)
+	whereTables := ""
+	if len(args) > 0 {
+		for i := range args {
+			args[i] = "'" + args[i] + "'"
+		}
+		whereTables = " AND TABLE_NAME IN (" + strings.Join(args, ",") + ")"
+	}
+	sqlStr := fmt.Sprintf("SELECT * FROM information_schema.tables WHERE `TABLE_SCHEMA` = '%s'%s", dbName, whereTables)
+	rows, err := db.Queryx(sqlStr)
+
 	if err != nil {
 		return tables, err
 	}
-	var tableName string
+	// var tableName string
+	var table TableSchema
 	for rows.Next() {
-		if err = rows.Scan(&tableName); err != nil {
+		if err = rows.StructScan(&table); err != nil {
 			return tables, err
 		}
-		tables = append(tables, tableName)
+		tables = append(tables, table)
 	}
 	return tables, nil
 }
 
 //GetTable 获取表
-func GetTable(tableName string) (Table, error) {
+func GetTable(tableSchema TableSchema) (Table, error) {
 	table := Table{
 		Fields: make([]Field, 0, 16),
 	}
-	table.OriginName = tableName
-	table.Name = tableName
+	table.Comment = tableSchema.TableComment.String
+	table.OriginName = tableSchema.TableName
+	table.Name = tableSchema.TableName
 	if tablePrefix != "" {
-		if strings.HasPrefix(tableName, tablePrefix) {
-			table.Name = tableName[len(tablePrefix):]
+		if strings.HasPrefix(tableSchema.TableName, tablePrefix) {
+			table.Name = tableSchema.TableName[len(tablePrefix):]
 		}
 	}
-	rows, err := db.Queryx("DESC `" + tableName + "`")
+	rows, err := db.Queryx(fmt.Sprintf("SELECT * FROM columns WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tableSchema.TableName))
+
 	if err != nil {
 		return table, err
 	}
-	var tableField TableField
+	// var tableField TableField
+	var tableField ColumnSchema
 	for rows.Next() {
 		if err = rows.StructScan(&tableField); err != nil {
 			return table, err
@@ -339,6 +406,9 @@ func (t *%s) TableName() string {
 func toStruct(table Table) string {
 	buf := bytes.NewBufferString("")
 	for _, field := range table.Fields {
+		if field.Comment != "" {
+			buf.WriteString("//" + toGoName(field.Name, table.Name) + " " + field.Comment + "\n")
+		}
 		buf.WriteString("\t" + toGoName(field.Name, table.Name) + "\t" + field.Type)
 		tags := make([]string, 0)
 		if tagJSON {
@@ -383,13 +453,17 @@ import (
 	"time"
 )`
 	}
-	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, table.Name, tableGoName, buf.String(), table.Name, tableGoName, table.OriginName)
+	comment := table.Name
+	if table.Comment != "" {
+		comment = table.Comment
+	}
+	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, comment, tableGoName, buf.String(), table.Name, tableGoName, table.OriginName)
 }
 
 //ParseField 解析字段
-func ParseField(tField TableField) Field {
+func ParseField(tField ColumnSchema) Field {
 	var field Field
-	attrs := strings.Split(tField.Type, " ")
+	attrs := strings.Split(tField.ColumnType, " ")
 	var t string
 	for _, attr := range attrs {
 		attr = strings.ToLower(attr)
@@ -404,19 +478,20 @@ func ParseField(tField TableField) Field {
 			t = attr
 		}
 	}
-	if tField.Null.String == "NULL" {
+	if tField.IsNullAble == "YES" {
 		field.EnableNull = true
 	}
-	if tField.Key.String == "PRI" {
+	if strings.Contains(tField.ColumnKey.String, "PRI") {
 		field.IsPrimaryKey = true
 	}
-	field.Name = tField.Field
+	field.Name = tField.ColumnName
 	field.Type = goType(t)
-	field.Default = tField.Default
+	field.Comment = tField.ColumnComment.String
+	field.Default = tField.ColumnDefault.String
 	if field.IsUnsigned && !useInt64 {
 		field.Type = "u" + field.Type
 	}
-	field.OriginType = tField.Type
+	field.OriginType = tField.ColumnType
 	return field
 }
 
@@ -472,7 +547,6 @@ func goType(dbType string) string {
 		return "time.Time"
 	default:
 		panic("未知类型:" + dbType)
-		//return ""
 	}
 }
 
