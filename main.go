@@ -21,6 +21,7 @@ import (
 var (
 	db                        *sqlx.DB
 	useInt64                  bool
+	useUnsigned               bool
 	commonInitialisms         = []string{"API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SSH", "TLS", "TTL", "UI", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XSRF", "XSS"}
 	commonInitialismsReplacer *strings.Replacer
 
@@ -40,7 +41,7 @@ var (
 	mapping     []string
 	mappingFile string
 	//dbMapping 映射关系
-	dbMapping      map[string]map[string]string
+	dbMapping      map[string]map[string]Mapping
 	query          string
 	tablePrefix    string
 	skipIfNoPrefix bool
@@ -54,16 +55,32 @@ type Mapping struct {
 
 //Field 字段
 type Field struct {
-	Name          string
-	Type          string
-	OriginType    string
-	Length        int
+	//Name 字段名
+	Name string
+	//OriginName 原始名称
+	OriginName string
+	//Type 数据类型
+	Type string
+	//OriginType 数据库原始类型
+	OriginType string
+	//Length 最大长度
+	Length int
+	//DecimalDigits 小数位数
 	DecimalDigits int
-	IsUnsigned    bool
-	EnableNull    bool
-	IsPrimaryKey  bool
-	Default       string
-	Comment       string
+	//IsUnsigned 是否为无符号整型
+	IsUnsigned bool
+	//EnableNull 是否允许为空
+	EnableNull bool
+	//IsPrimaryKey 是否是主键
+	IsPrimaryKey bool
+	//IsAutoIncrement 是否是自增字段
+	IsAutoIncrement bool
+	//IsSQLType 是否是sql.NullInt64之类的类型
+	IsSQLType bool
+	//Default 默认值
+	Default string
+	//Comment 注释
+	Comment string
 }
 
 //Table 表
@@ -140,8 +157,8 @@ type ColumnSchema struct {
 }
 
 func init() {
-	dbMapping = map[string]map[string]string{
-		"global": make(map[string]string),
+	dbMapping = map[string]map[string]Mapping{
+		"global": make(map[string]Mapping),
 	}
 	var commonInitialismsForReplacer []string
 	for _, initialism := range commonInitialisms {
@@ -150,6 +167,7 @@ func init() {
 	commonInitialismsReplacer = strings.NewReplacer(commonInitialismsForReplacer...)
 
 	flag.BoolVar(&useInt64, "int64", false, "是否将tinyint、smallint等类型也转换int64")
+	flag.BoolVar(&useUnsigned, "unsigned", true, "当表中字段为无符号整型时是否在go中也转换为uint的形式")
 	flag.StringVar(&dbHost, "db_host", "127.0.0.1", "数据库ip地址")
 	flag.IntVar(&dbPort, "db_port", 3306, "数据库端口")
 	flag.StringVar(&dbUser, "db_user", "root", "数据库用户名")
@@ -286,13 +304,13 @@ func main() {
 //toGoName 参考 github.com/jinzhu/gorm 的 ToDBName
 func toGoName(dbName string, tableName string) string {
 	if m, ok := dbMapping[tableName]; ok {
-		if goName, goNameOK := m[dbName]; goNameOK {
-			return goName
+		if mapping, goNameOK := m[dbName]; goNameOK {
+			return mapping.FieldName
 		}
 	}
 	if m, ok := dbMapping["global"]; ok {
-		if goName, goNameOK := m[dbName]; goNameOK {
-			return goName
+		if mapping, goNameOK := m[dbName]; goNameOK {
+			return mapping.FieldName
 		}
 	}
 	if len(dbName) == 1 {
@@ -405,11 +423,15 @@ func (t *%s) TableName() string {
 //toStruct 将表转换为struct字符串
 func toStruct(table Table) string {
 	buf := bytes.NewBufferString("")
+	var hasSQLType = false
 	for _, field := range table.Fields {
+		if field.IsSQLType {
+			hasSQLType = true
+		}
 		if field.Comment != "" {
 			buf.WriteString("//" + toGoName(field.Name, table.Name) + " " + field.Comment + "\n")
 		}
-		buf.WriteString("\t" + toGoName(field.Name, table.Name) + "\t" + field.Type)
+		buf.WriteString(toGoName(field.Name, table.Name) + "\t" + field.Type)
 		tags := make([]string, 0)
 		if tagJSON {
 			tags = append(tags, `json:"`+field.Name+`"`)
@@ -425,6 +447,15 @@ func toStruct(table Table) string {
 				} else {
 					gormTags = append(gormTags, "type:"+field.OriginType)
 				}
+			}
+			if !field.EnableNull {
+				gormTags = append(gormTags, "not null")
+			}
+			if field.IsPrimaryKey {
+				gormTags = append(gormTags, "primary_key")
+			}
+			if field.IsAutoIncrement {
+				gormTags = append(gormTags, "AUTO_INCREMENT")
 			}
 			tags = append(tags, fmt.Sprintf(`gorm:"%s"`, strings.Join(gormTags, ";")))
 		}
@@ -447,11 +478,23 @@ func toStruct(table Table) string {
 	}
 	tableGoName := toGoName(table.Name, table.Name)
 	importString := "\n"
+	imports := make([]string, 0, 2)
 	if table.HasTime {
+		imports = append(imports, `"time"`)
 		importString = `
 import (
 	"time"
 )`
+	}
+	if hasSQLType {
+		imports = append(imports, `"database/sql"`)
+	}
+	if len(imports) > 0 {
+		importString = fmt.Sprintf(`
+		import (
+			%s
+		)
+		`, strings.Join(imports, "\n"))
 	}
 	comment := table.Name
 	if table.Comment != "" {
@@ -484,13 +527,44 @@ func ParseField(tField ColumnSchema) Field {
 	if strings.Contains(tField.ColumnKey.String, "PRI") {
 		field.IsPrimaryKey = true
 	}
+	if strings.Contains(tField.Extra.String, "auto_increment") {
+		field.IsAutoIncrement = true
+	}
 	field.Name = tField.ColumnName
 	field.Type = goType(t)
-	field.Comment = tField.ColumnComment.String
-	field.Default = tField.ColumnDefault.String
-	if field.IsUnsigned && !useInt64 {
+	if field.IsUnsigned && useUnsigned && !useInt64 {
 		field.Type = "u" + field.Type
 	}
+	// 如果映射中有设定数据类型则从映射中获取数据类型: {{{1
+	m, ok := dbMapping[tField.TableName]
+	if !ok {
+		m, ok = dbMapping["global"]
+	}
+	if ok {
+		if mapping, ok := m[field.Name]; ok && mapping.FieldType != "" {
+			field.Type = mapping.FieldType
+
+		}
+	}
+	//无视映射规则中的大小写
+	switch strings.ToUpper(field.Type) {
+	case "SQL.NULLINT64":
+		field.IsSQLType = true
+		field.Type = "sql.NullInt64"
+	case "SQL.NULLSTRING":
+		field.IsSQLType = true
+		field.Type = "sql.NullString"
+	case "SQL.NULLBOOL":
+		field.IsSQLType = true
+		field.Type = "sql.NullBool"
+	case "SQL.NULLFLOAT64":
+		field.IsSQLType = true
+		field.Type = "sql.NullFloat64"
+	}
+	// }}}
+
+	field.Comment = tField.ColumnComment.String
+	field.Default = tField.ColumnDefault.String
 	field.OriginType = tField.ColumnType
 	return field
 }
@@ -552,29 +626,44 @@ func goType(dbType string) string {
 
 //addMapping 增加映射
 func addMapping(m string) error {
-	if strings.Count(m, ":") != 1 {
+	if strings.Count(m, ":") == 0 {
 		return fmt.Errorf("映射格式错误: [%s]", m)
 	}
-	m1 := strings.Split(m, ":")
-	if len(m1) != 2 {
+	index := strings.Index(m, ":")
+	if index == 0 || index >= len(m)-2 {
 		return fmt.Errorf("映射格式错误: [%s]", m)
 	}
-	destName := m1[1]
+	origin := m[0:index]
+	dest := m[index+1:]
 	var originName string
 	tableName := "global"
-	if strings.Contains(m1[0], ".") {
-		m2 := strings.Split(m1[0], ".")
+	if strings.Contains(origin, ".") {
+		m2 := strings.Split(origin, ".")
 		if len(m2) != 2 {
 			return fmt.Errorf("映射格式错误: [%s]", m)
 		}
 		tableName, originName = m2[0], m2[1]
 	} else {
-		originName = m1[0]
+		originName = origin
 	}
+	mapping := Mapping{}
+	if strings.Contains(dest, ",") {
+		m3 := strings.Split(dest, ",")
+		mapping.FieldName = m3[0]
+		for i := 1; i < len(m3); i++ {
+			attr := strings.Split(m3[i], ":")
+			if attr[0] == "type" {
+				mapping.FieldType = attr[1]
+			}
+		}
+	} else {
+		mapping.FieldName = dest
+	}
+
 	if _, ok := dbMapping[tableName]; !ok {
-		dbMapping[tableName] = make(map[string]string)
+		dbMapping[tableName] = make(map[string]Mapping)
 	}
-	dbMapping[tableName][originName] = destName
+	dbMapping[tableName][originName] = mapping
 	return nil
 }
 
