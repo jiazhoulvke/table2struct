@@ -532,7 +532,7 @@ func ParseField(tField ColumnSchema) Field {
 	}
 	field.Name = tField.ColumnName
 	field.Type = goType(t)
-	if field.IsUnsigned && useUnsigned && !useInt64 {
+	if field.IsUnsigned && useUnsigned && strings.Contains(strings.ToLower(field.Type), "int") && !useInt64 {
 		field.Type = "u" + field.Type
 	}
 	// 如果映射中有设定数据类型则从映射中获取数据类型: {{{1
