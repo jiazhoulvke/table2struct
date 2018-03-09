@@ -506,20 +506,8 @@ import (
 //ParseField 解析字段
 func ParseField(tField ColumnSchema) Field {
 	var field Field
-	attrs := strings.Split(tField.ColumnType, " ")
-	var t string
-	for _, attr := range attrs {
-		attr = strings.ToLower(attr)
-		if attr == "unsigned" {
-			field.IsUnsigned = true
-		} else if strings.Contains(attr, "(") && strings.Contains(attr, ")") {
-			l := strings.Index(attr, "(")
-			if l > 0 {
-				t = attr[0:l]
-			}
-		} else {
-			t = attr
-		}
+	if strings.Contains(tField.ColumnType, "unsigned") {
+		field.IsUnsigned = true
 	}
 	if tField.IsNullAble == "YES" {
 		field.EnableNull = true
@@ -531,7 +519,7 @@ func ParseField(tField ColumnSchema) Field {
 		field.IsAutoIncrement = true
 	}
 	field.Name = tField.ColumnName
-	field.Type = goType(t)
+	field.Type = goType(tField.DataType)
 	if field.IsUnsigned && useUnsigned && strings.Contains(strings.ToLower(field.Type), "int") && !useInt64 {
 		field.Type = "u" + field.Type
 	}
