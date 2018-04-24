@@ -524,14 +524,14 @@ func ParseField(tField ColumnSchema) Field {
 		field.Type = "u" + field.Type
 	}
 	// 如果映射中有设定数据类型则从映射中获取数据类型: {{{1
-	m, ok := dbMapping[tField.TableName]
-	if !ok {
-		m, ok = dbMapping["global"]
-	}
-	if ok {
+	if m, ok := dbMapping["global"]; ok {
 		if mapping, ok := m[field.Name]; ok && mapping.FieldType != "" {
 			field.Type = mapping.FieldType
-
+		}
+	}
+	if m, ok := dbMapping[tField.TableName]; ok {
+		if mapping, ok := m[field.Name]; ok && mapping.FieldType != "" {
+			field.Type = mapping.FieldType
 		}
 	}
 	//无视映射规则中的大小写
