@@ -142,7 +142,7 @@ foo => bar
 > google_table2  
 > google_table3  
 
-这时生成的文件名是google_table1.go，结构名是GoogleTable1。然而我们需要它生成的文件名是google1.go，结构名是Table1，这时就可以用到`--table_prefix`这个参数了
+这时生成的文件名是google_table1.go，结构名是GoogleTable1。然而我们需要它生成的文件名是table1.go，结构名是Table1，这时就可以用到`--table_prefix`这个参数了
 
 ```bash
 $ table2struct --table_prefix google_
