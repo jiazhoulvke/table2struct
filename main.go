@@ -45,6 +45,8 @@ var (
 	query          string
 	tablePrefix    string
 	skipIfNoPrefix bool
+	nullType       bool
+	extNullType    bool
 )
 
 //Mapping 映射
@@ -75,8 +77,10 @@ type Field struct {
 	IsPrimaryKey bool
 	//IsAutoIncrement 是否是自增字段
 	IsAutoIncrement bool
-	//IsSQLType 是否是sql.NullInt64之类的类型
-	IsSQLType bool
+	//IsNullType 是否是sql.NullInt64之类的类型
+	IsNullType bool
+	//IsExtNullType 是否是nulltype.NullInt64之类的类型
+	IsExtNullType bool
 	//Default 默认值
 	Default string
 	//Comment 注释
@@ -167,7 +171,7 @@ func init() {
 	commonInitialismsReplacer = strings.NewReplacer(commonInitialismsForReplacer...)
 
 	flag.BoolVar(&useInt64, "int64", false, "是否将tinyint、smallint等类型也转换int64")
-	flag.BoolVar(&useUnsigned, "unsigned", true, "当表中字段为无符号整型时是否在go中也转换为uint的形式")
+	flag.BoolVar(&useUnsigned, "unsigned", false, "当表中字段为无符号整型时是否在go中也转换为uint的形式")
 	flag.StringVar(&dbHost, "db_host", "127.0.0.1", "数据库ip地址")
 	flag.IntVar(&dbPort, "db_port", 3306, "数据库端口")
 	flag.StringVar(&dbUser, "db_user", "root", "数据库用户名")
@@ -186,6 +190,8 @@ func init() {
 	flag.StringVar(&query, "query", "", "查询数据库字段名转换后的golang字段名并立即退出")
 	flag.StringVar(&tablePrefix, "table_prefix", "", "表名前缀")
 	flag.BoolVar(&skipIfNoPrefix, "skip_if_no_prefix", false, "当表名不包含指定前缀时跳过不处理")
+	flag.BoolVar(&nullType, "null_type", false, "当字段允许为空时是否用复合类型(如sql.NullInt64)代替")
+	flag.BoolVar(&extNullType, "ext_null_type", false, "用go-nulltype取代database/sql")
 }
 
 func main() {
@@ -383,7 +389,7 @@ func GetTable(tableSchema TableSchema) (Table, error) {
 			table.Name = tableSchema.TableName[len(tablePrefix):]
 		}
 	}
-	rows, err := db.Queryx(fmt.Sprintf("SELECT * FROM columns WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tableSchema.TableName))
+	rows, err := db.Queryx(fmt.Sprintf("SELECT * FROM information_schema.columns WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tableSchema.TableName))
 
 	if err != nil {
 		return table, err
@@ -423,10 +429,14 @@ func (t *%s) TableName() string {
 //toStruct 将表转换为struct字符串
 func toStruct(table Table) string {
 	buf := bytes.NewBufferString("")
-	var hasSQLType = false
+	var hasNullType = false
+	var hasExtNullType = false
 	for _, field := range table.Fields {
-		if field.IsSQLType {
-			hasSQLType = true
+		if field.IsNullType {
+			hasNullType = true
+		}
+		if field.IsExtNullType {
+			hasExtNullType = true
 		}
 		if field.Comment != "" {
 			buf.WriteString("//" + toGoName(field.Name, table.Name) + " " + field.Comment + "\n")
@@ -481,13 +491,12 @@ func toStruct(table Table) string {
 	imports := make([]string, 0, 2)
 	if table.HasTime {
 		imports = append(imports, `"time"`)
-		importString = `
-import (
-	"time"
-)`
 	}
-	if hasSQLType {
+	if hasNullType {
 		imports = append(imports, `"database/sql"`)
+	}
+	if hasExtNullType {
+		imports = append(imports, `"github.com/mattn/go-nulltype"`)
 	}
 	if len(imports) > 0 {
 		importString = fmt.Sprintf(`
@@ -519,7 +528,7 @@ func ParseField(tField ColumnSchema) Field {
 		field.IsAutoIncrement = true
 	}
 	field.Name = tField.ColumnName
-	field.Type = goType(tField.DataType)
+	field.Type, field.IsNullType, field.IsExtNullType = goType(tField.DataType, field.EnableNull)
 	if field.IsUnsigned && useUnsigned && strings.Contains(strings.ToLower(field.Type), "int") && !useInt64 {
 		field.Type = "u" + field.Type
 	}
@@ -537,17 +546,32 @@ func ParseField(tField ColumnSchema) Field {
 	//无视映射规则中的大小写
 	switch strings.ToUpper(field.Type) {
 	case "SQL.NULLINT64":
-		field.IsSQLType = true
+		field.IsNullType = true
 		field.Type = "sql.NullInt64"
 	case "SQL.NULLSTRING":
-		field.IsSQLType = true
+		field.IsNullType = true
 		field.Type = "sql.NullString"
 	case "SQL.NULLBOOL":
-		field.IsSQLType = true
+		field.IsNullType = true
 		field.Type = "sql.NullBool"
 	case "SQL.NULLFLOAT64":
-		field.IsSQLType = true
+		field.IsNullType = true
 		field.Type = "sql.NullFloat64"
+	case "NULLTYPE.NULLINT64":
+		field.IsExtNullType = true
+		field.Type = "nulltype.NullInt64"
+	case "NULLTYPE.NULLSTRING":
+		field.IsExtNullType = true
+		field.Type = "nulltype.NullString"
+	case "NULLTYPE.NULLBOOL":
+		field.IsExtNullType = true
+		field.Type = "nulltype.NullBool"
+	case "NULLTYPE.NULLFLOAT64":
+		field.IsExtNullType = true
+		field.Type = "nulltype.NullFloat64"
+	case "NULLTYPE.NULLTIME":
+		field.IsExtNullType = true
+		field.Type = "nulltype.NullTime"
 	}
 	// }}}
 
@@ -557,13 +581,25 @@ func ParseField(tField ColumnSchema) Field {
 	return field
 }
 
-func goType(dbType string) string {
+func goType(dbType string, isNullAble bool) (goType string, isNullType bool, IsExtNullType bool) {
 	switch dbType {
 	case "tinyint":
 		if useInt64 {
-			return "int64"
+			if nullType && isNullAble {
+				if extNullType {
+					return "nulltype.NullInt64", false, true
+				}
+				return "sql.NullInt64", true, false
+			}
+			return "int64", false, false
 		}
-		return "int8"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullInt64", false, true
+			}
+			return "sql.NullInt64", true, false
+		}
+		return "int8", false, false
 	case "smallint":
 		fallthrough
 	case "mediumint":
@@ -572,11 +608,29 @@ func goType(dbType string) string {
 		fallthrough
 	case "int":
 		if useInt64 {
-			return "int64"
+			if nullType && isNullAble {
+				if extNullType {
+					return "nulltype.NullInt64", false, true
+				}
+				return "sql.NullInt64", true, false
+			}
+			return "int64", false, false
 		}
-		return "int"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullInt64", false, true
+			}
+			return "sql.NullInt64", true, false
+		}
+		return "int", false, false
 	case "bigint":
-		return "int64"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullInt64", false, true
+			}
+			return "sql.NullInt64", true, false
+		}
+		return "int64", false, false
 	case "float":
 		fallthrough
 	case "double":
@@ -584,9 +638,21 @@ func goType(dbType string) string {
 	case "decimal":
 		fallthrough
 	case "numeric":
-		return "float64"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullFloat64", false, true
+			}
+			return "sql.NullFloat64", true, false
+		}
+		return "float64", false, false
 	case "bool":
-		return "bool"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullBool", false, true
+			}
+			return "sql.NullBool", true, false
+		}
+		return "bool", false, false
 	case "char":
 		fallthrough
 	case "varchar":
@@ -598,7 +664,13 @@ func goType(dbType string) string {
 	case "mediumtext":
 		fallthrough
 	case "longtext":
-		return "string"
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullString", false, true
+			}
+			return "sql.NullString", true, false
+		}
+		return "string", false, false
 	case "date":
 		fallthrough
 	case "datetime":
@@ -606,7 +678,10 @@ func goType(dbType string) string {
 	case "time":
 		fallthrough
 	case "timestamp":
-		return "time.Time"
+		if nullType && extNullType && isNullAble {
+			return "nulltype.NullTime", false, true
+		}
+		return "time.Time", false, false
 	default:
 		panic("未知类型:" + dbType)
 	}
