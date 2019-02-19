@@ -421,7 +421,7 @@ type %s struct {
 }
 
 //TableName %s
-func (t *%s) TableName() string {
+func (t %s) TableName() string {
 	return "%s"
 }`
 )
