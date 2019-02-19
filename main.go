@@ -509,7 +509,7 @@ func toStruct(table Table) string {
 	if table.Comment != "" {
 		comment = table.Comment
 	}
-	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, comment, tableGoName, buf.String(), table.Name, tableGoName, table.OriginName)
+	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, comment, tableGoName, buf.String(), table.Name, tableGoName, table.Name)
 }
 
 //ParseField 解析字段
