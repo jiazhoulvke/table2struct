@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/iancoleman/strcase"
 	"github.com/jmoiron/sqlx"
 	flag "github.com/spf13/pflag"
 )
@@ -38,6 +39,7 @@ var (
 	tagGORMType bool
 	tagXORMType bool
 	tagJSON     bool
+	tagJSONCase string // 指定JSON tag中字段的命名风格
 	mapping     []string
 	mappingFile string
 	//dbMapping 映射关系
@@ -186,6 +188,7 @@ func init() {
 	flag.BoolVar(&tagXORMType, "tag_xorm_type", true, "是否将type包含进xorm的tag")
 	flag.BoolVar(&tagSQLX, "tag_sqlx", false, "是否生成sqlx的tag")
 	flag.BoolVar(&tagJSON, "tag_json", true, "是否生成json的tag")
+	flag.StringVar(&tagJSONCase, "tag_json_case", "", "json tag字段命名风格:snake,camel,lowcamel.")
 	flag.StringSliceVar(&mapping, "mapping", []string{}, "强制将字段名转换成指定的名称。如--mapping foo:Bar,则表中叫foo的字段在golang中会强制命名为Bar")
 	flag.StringVar(&mappingFile, "mapping_file", "", "字段名映射文件")
 	flag.StringVar(&query, "query", "", "查询数据库字段名转换后的golang字段名并立即退出")
@@ -445,7 +448,7 @@ func toStruct(table Table) string {
 		buf.WriteString(toGoName(field.Name, table.Name) + "\t" + field.Type)
 		tags := make([]string, 0)
 		if tagJSON {
-			tags = append(tags, `json:"`+field.Name+`"`)
+			tags = append(tags, `json:"`+convertCase(field.Name, tagJSONCase)+`"`)
 		}
 		if tagSQLX {
 			tags = append(tags, `db:"`+field.Name+`"`)
@@ -743,4 +746,18 @@ func parseQuery(query string) (tableName, fieldName string, err error) {
 		fieldName = query
 	}
 	return
+}
+
+func convertCase(raw, casename string) string {
+	casename = strings.ToLower(casename)
+	switch casename {
+	case "snake":
+		return strcase.ToSnake(raw)
+	case "camel":
+		return strcase.ToCamel(raw)
+	case "lowcamel":
+		return strcase.ToLowerCamel(raw)
+	default:
+		return raw
+	}
 }
