@@ -158,6 +158,7 @@ type ColumnSchema struct {
 	Privileges             sql.NullString `db:"PRIVILEGES"`
 	ColumnComment          sql.NullString `db:"COLUMN_COMMENT"`
 	GenerationExpression   string         `db:"GENERATION_EXPRESSION"`
+	SRSID                  sql.NullInt64  `db:"SRS_ID"` // MySQL 8.0
 }
 
 func init() {
