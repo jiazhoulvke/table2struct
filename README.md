@@ -6,6 +6,7 @@ Forked from: <https://github.com/jiazhoulvke/table2struct>
 
 - 支持MySQL 8.0
 - 支持Struct中的JSON tag的命名风格设置
+- TableName使用指针方法
 
 ## 安装 ##
 
