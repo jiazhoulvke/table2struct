@@ -1,4 +1,4 @@
-module github.com/jiazhoulvke/table2struct
+module github.com/axiaoxin/table2struct
 
 go 1.13
 
