@@ -1,14 +1,23 @@
 # table2struct #
 
-我写golang代码时最烦的就是为MySQL数据库定义相应的struct，这种机械化的任务当然是要交给机器来完成啦。table2struct可以一次性生成整个数据库里所有表的struct，也可以选择性的生成某几个表的struct，然后根据你的需求稍加修改就能用了。
+Forked from: <https://github.com/jiazhoulvke/table2struct>
+
+更新特性:
+
+- 支持MySQL 8.0
+- 支持Struct中的JSON tag的命名风格设置
 
 ## 安装 ##
 
 ```bash
-go get github.com/jiazhoulvke/table2struct
+go get github.com/axiaoxin/table2struct
 ```
 
 ## 使用说明 ##
+
+```
+table2struct --tag_gorm --tag_sqlx --db_host localhost --db_port 3306 --db_user root --db_pwd pwd --db_name db
+```
 
 ### 基本应用 ###
 
@@ -32,6 +41,7 @@ Usage of table2struct:
       --tag_gorm              是否生成gorm的tag
       --tag_gorm_type         是否将type包含进gorm的tag (default true)
       --tag_json              是否生成json的tag (default true)
+      --tag_json_case         指定JSON tag中字段的命名风格（snake：下划线风格，camel：大驼峰，lowcamel：小驼峰），默认为db中的原始字段
       --tag_sqlx              是否生成sqlx的tag
       --tag_xorm              是否生成xorm的tag
       --tag_xorm_type         是否将type包含进xorm的tag (default true)
@@ -76,9 +86,9 @@ func (t *User) TableName() string {
 
 介绍几个需要注意的参数：
 
-- `--int64` 
+- `--int64`
  强制把所有整型字段全部声明为int64,比如上面示例中的Status为`Status int8`,加入参数--int64=true后，生成的字段就会是`Status int64`
-- `--tag_json` 
+- `--tag_json`
  默认启用，会在struct的tag里增加`json:"字段名"`
 - 同理，`--tag_sqlx`、`--tag_xorm`、`--tag_gorm`可以分别生成对应框架需要的tag
 
@@ -115,7 +125,7 @@ table2struct --mapping foo1:foo2 --mapping bar1:bar2 --mapping baz1:baz2
 ```bash
 $ table2struct --mapping table1.foo1:foo2 --query foo1
 
-table1.foo1 = table1.Foo1 
+table1.foo1 = table1.Foo1
 
 $ table2struct --mapping table1.foo1:foo2 --query table1.foo1
 
@@ -138,9 +148,9 @@ foo => bar
 
 有时我们的表名都带有统一的前缀，比如:
 
-> google_table1  
-> google_table2  
-> google_table3  
+> google_table1
+> google_table2
+> google_table3
 
 这时生成的文件名是google_table1.go，结构名是GoogleTable1。然而我们需要它生成的文件名是table1.go，结构名是Table1，这时就可以用到`--table_prefix`这个参数了
 
