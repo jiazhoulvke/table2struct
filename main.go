@@ -359,7 +359,7 @@ func GetTables(args []string) ([]TableSchema, error) {
 		}
 		whereTables = " AND TABLE_NAME IN (" + strings.Join(args, ",") + ")"
 	}
-	sqlStr := fmt.Sprintf("SELECT * FROM information_schema.tables WHERE `TABLE_SCHEMA` = '%s'%s", dbName, whereTables)
+	sqlStr := fmt.Sprintf("SELECT TABLE_CATALOG,TABLE_SCHEMA,TABLE_NAME,TABLE_TYPE,ENGINE,`VERSION`,ROW_FORMAT,TABLE_ROWS,AVG_ROW_LENGTH,DATA_LENGTH,MAX_DATA_LENGTH,INDEX_LENGTH,DATA_FREE,`AUTO_INCREMENT`,CREATE_TIME,UPDATE_TIME,CHECK_TIME,TABLE_COLLATION,CHECKSUM,CREATE_OPTIONS,TABLE_COMMENT FROM information_schema.tables WHERE `TABLE_SCHEMA` = '%s'%s", dbName, whereTables)
 	rows, err := db.Queryx(sqlStr)
 
 	if err != nil {
