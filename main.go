@@ -176,7 +176,7 @@ func init() {
 	flag.StringVar(&dbPwd, "db_pwd", "root", "数据库密码")
 	flag.StringVar(&dbName, "db_name", "", "数据库名")
 	flag.StringVar(&packageName, "package_name", "models", "包名")
-	flag.StringVar(&output, "output", "", "输出路径,默认为当前目录")
+	flag.StringVar(&output, "output", ".", "输出路径,默认为当前目录")
 	flag.BoolVar(&tagGORM, "tag_gorm", false, "是否生成gorm的tag")
 	flag.BoolVar(&tagGORMType, "tag_gorm_type", true, "是否将type包含进gorm的tag")
 	flag.BoolVar(&tagXORM, "tag_xorm", false, "是否生成xorm的tag")
@@ -236,14 +236,6 @@ func main() {
 		}
 		fmt.Println(query, "=>", displayTable+toGoName(originName, tableName))
 		return
-	}
-
-	if output == "" {
-		output, err = filepath.Abs(filepath.Dir(os.Args[0]))
-		if err != nil {
-			fmt.Printf("获取当前路径失败")
-			os.Exit(1)
-		}
 	}
 
 	if _, statErr := os.Stat(output); statErr != nil {
