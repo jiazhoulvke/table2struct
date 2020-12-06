@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"go/format"
-	"go/parser"
-	"go/token"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -280,27 +278,13 @@ func main() {
 			fmt.Printf("读取表%v失败:%v\n", tableSchema.TableName, err)
 			os.Exit(1)
 		}
-		tmpFile, err := ioutil.TempFile(os.TempDir(), "table2struct_")
+		content, err := format.Source([]byte(toStruct(table)))
 		if err != nil {
-			fmt.Println("创建临时文件失败:", err)
+			fmt.Println("格式化失败:", err)
 			os.Exit(1)
 		}
-		tmpFile.WriteString(toStruct(table))
-		tmpFile.Close()
-		defer os.Remove(tmpFile.Name())
-		fset := token.NewFileSet()
-		node, err := parser.ParseFile(fset, tmpFile.Name(), nil, parser.ParseComments)
-		if err != nil {
-			fmt.Println("解析struct失败:", err)
-			os.Exit(1)
-		}
-		var buf bytes.Buffer
-		if err := format.Node(&buf, fset, node); err != nil {
-			fmt.Printf("格式化%s的代码失败:%v\n", tableSchema.TableName, err)
-			os.Exit(1)
-		}
-		if err = ioutil.WriteFile(filepath.Join(output, table.Name+".go"), buf.Bytes(), 0666); err != nil {
-			fmt.Printf("保存文件失败:%v\n", err)
+		if err := ioutil.WriteFile(filepath.Join(output, table.Name+".go"), content, 0666); err != nil {
+			fmt.Println("保存文件失败:", err)
 			os.Exit(1)
 		}
 	}
