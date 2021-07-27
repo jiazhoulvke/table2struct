@@ -341,7 +341,6 @@ func GetTables(args []string) ([]TableSchema, error) {
 	if err != nil {
 		return tables, err
 	}
-	// var tableName string
 	var table TableSchema
 	for rows.Next() {
 		if err = rows.StructScan(&table); err != nil {
@@ -365,18 +364,16 @@ func GetTable(tableSchema TableSchema) (Table, error) {
 			table.Name = tableSchema.TableName[len(tablePrefix):]
 		}
 	}
-	rows, err := db.Queryx(fmt.Sprintf("SELECT * FROM information_schema.columns WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tableSchema.TableName))
-
+	rows, err := db.Queryx(fmt.Sprintf("SELECT `TABLE_CATALOG`,`TABLE_SCHEMA`,`TABLE_NAME`,`COLUMN_NAME`,`ORDINAL_POSITION`,`COLUMN_DEFAULT`,`IS_NULLABLE`,`DATA_TYPE`,`CHARACTER_MAXIMUM_LENGTH`,`CHARACTER_OCTET_LENGTH`,`NUMERIC_PRECISION`,`NUMERIC_SCALE`,`DATETIME_PRECISION`,`CHARACTER_SET_NAME`,`COLLATION_NAME`,`COLUMN_TYPE`,`COLUMN_KEY`,`EXTRA`,`PRIVILEGES`,`COLUMN_COMMENT`,`GENERATION_EXPRESSION` FROM information_schema.columns WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tableSchema.TableName))
 	if err != nil {
 		return table, err
 	}
-	// var tableField TableField
-	var tableField ColumnSchema
+	var col ColumnSchema
 	for rows.Next() {
-		if err = rows.StructScan(&tableField); err != nil {
+		if err = rows.StructScan(&col); err != nil {
 			return table, err
 		}
-		field := ParseField(tableField)
+		field := ParseField(col)
 		if field.Type == "time.Time" {
 			table.HasTime = true
 		}
@@ -472,7 +469,7 @@ func toStruct(table Table) string {
 		imports = append(imports, `"database/sql"`)
 	}
 	if hasExtNullType {
-		imports = append(imports, `"github.com/mattn/go-nulltype"`)
+		imports = append(imports, `nulltype "github.com/mattn/go-nulltype"`)
 	}
 	if len(imports) > 0 {
 		importString = fmt.Sprintf(`
@@ -485,26 +482,26 @@ func toStruct(table Table) string {
 	if table.Comment != "" {
 		comment = table.Comment
 	}
-	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, comment, tableGoName, buf.String(), table.Name, tableGoName, table.Name)
+	return fmt.Sprintf(tableTpl, packageName, importString, tableGoName, comment, tableGoName, buf.String(), tablePrefix+table.Name, tableGoName, tablePrefix+table.Name)
 }
 
 //ParseField 解析字段
-func ParseField(tField ColumnSchema) Field {
+func ParseField(col ColumnSchema) Field {
 	var field Field
-	if strings.Contains(tField.ColumnType, "unsigned") {
+	if strings.Contains(col.ColumnType, "unsigned") {
 		field.IsUnsigned = true
 	}
-	if tField.IsNullAble == "YES" {
+	if col.IsNullAble == "YES" {
 		field.EnableNull = true
 	}
-	if strings.Contains(tField.ColumnKey.String, "PRI") {
+	if strings.Contains(col.ColumnKey.String, "PRI") {
 		field.IsPrimaryKey = true
 	}
-	if strings.Contains(tField.Extra.String, "auto_increment") {
+	if strings.Contains(col.Extra.String, "auto_increment") {
 		field.IsAutoIncrement = true
 	}
-	field.Name = tField.ColumnName
-	field.Type, field.IsNullType, field.IsExtNullType = goType(tField.DataType, field.EnableNull)
+	field.Name = col.ColumnName
+	field.Type, field.IsNullType, field.IsExtNullType = goType(col.DataType, field.EnableNull)
 	if field.IsUnsigned && useUnsigned && strings.Contains(strings.ToLower(field.Type), "int") && !useInt64 {
 		field.Type = "u" + field.Type
 	}
@@ -514,7 +511,7 @@ func ParseField(tField ColumnSchema) Field {
 			field.Type = mapping.FieldType
 		}
 	}
-	if m, ok := dbMapping[tField.TableName]; ok {
+	if m, ok := dbMapping[col.TableName]; ok {
 		if mapping, ok := m[field.Name]; ok && mapping.FieldType != "" {
 			field.Type = mapping.FieldType
 		}
@@ -551,9 +548,9 @@ func ParseField(tField ColumnSchema) Field {
 	}
 	// }}}
 
-	field.Comment = tField.ColumnComment.String
-	field.Default = tField.ColumnDefault.String
-	field.OriginType = tField.ColumnType
+	field.Comment = col.ColumnComment.String
+	field.Default = col.ColumnDefault.String
+	field.OriginType = col.ColumnType
 	return field
 }
 
@@ -658,6 +655,19 @@ func goType(dbType string, isNullAble bool) (goType string, isNullType bool, IsE
 			return "nulltype.NullTime", false, true
 		}
 		return "time.Time", false, false
+	case "enum":
+		if nullType && isNullAble {
+			if extNullType {
+				return "nulltype.NullString", false, true
+			}
+			return "sql.NullString", true, false
+		}
+		return "string", false, false
+	case "json":
+		if extNullType {
+			return "nulltype.NullString", false, true
+		}
+		return "sql.NullString", true, false
 	default:
 		panic("未知类型:" + dbType)
 	}
